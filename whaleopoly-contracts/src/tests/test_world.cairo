@@ -1,99 +1,99 @@
 #[cfg(test)]
 mod tests {
     use dojo_cairo_test::WorldStorageTestTrait;
-    use dojo::model::{ModelStorage, ModelStorageTest};
     use dojo::world::WorldStorageTrait;
-    use dojo_cairo_test::{
-        spawn_test_world, NamespaceDef, TestResource, ContractDefTrait, ContractDef,
-    };
+    use dojo_cairo_test::spawn_test_world;
+    use array::ArrayTrait;
+    use starknet::ContractAddress;
+    use whaleopoly_contracts::components::{player::Player, property::Property, bank::Bank, game::Game};
+    use whaleopoly_contracts::systems::{start_game::start_game_system, buy_property::buy_property_system, pay_rent::pay_rent_system};
+    use array::Array;
+    use option::Option;
 
-    use dojo_starter::systems::actions::{actions, IActionsDispatcher, IActionsDispatcherTrait};
-    use dojo_starter::models::{Position, m_Position, Moves, m_Moves, Direction};
+    #[test]
+    fn test_game_init_and_player_balances() {
+        let mut world = spawn_test_world([]);
+        let player1 = ContractAddress::from(0x1111);
+        let player2 = ContractAddress::from(0x2222);
+        let mut players = ArrayTrait::new();
+        players.push(player1);
+        players.push(player2);
+        let initial_balance = 1500;
+        start_game_system(world.storage(), players.clone(), initial_balance);
 
-    fn namespace_def() -> NamespaceDef {
-        let ndef = NamespaceDef {
-            namespace: "dojo_starter",
-            resources: [
-                TestResource::Model(m_Position::TEST_CLASS_HASH),
-                TestResource::Model(m_Moves::TEST_CLASS_HASH),
-                TestResource::Event(actions::e_Moved::TEST_CLASS_HASH),
-                TestResource::Contract(actions::TEST_CLASS_HASH),
-            ]
-                .span(),
+        let p1: Player = world.read_model(player1);
+        let p2: Player = world.read_model(player2);
+        assert(p1.in_game_balance == initial_balance, 'Player 1 initial balance wrong');
+        assert(p2.in_game_balance == initial_balance, 'Player 2 initial balance wrong');
+        let bank: Bank = world.read_model(1);
+        assert(bank.funds == 1_000_000_000, 'Bank initial funds wrong');
+    }
+
+    #[test]
+    fn test_buy_property() {
+        let mut world = spawn_test_world([]);
+        let player = ContractAddress::from(0x1111);
+        let mut players = ArrayTrait::new();
+        players.push(player);
+        let initial_balance = 1500;
+        start_game_system(world.storage(), players.clone(), initial_balance);
+
+        // Create a property at position 0, price 200
+        let property_id = 0;
+        let property = Property {
+            id: property_id,
+            name: 'Boardwalk',
+            price: 200,
+            rent: 50,
+            owner: Option::None,
+            color_group: 1,
         };
+        world.write_model(@property);
 
-        ndef
-    }
+        // Move player to position 0
+        let mut p: Player = world.read_model(player);
+        p.position = 0;
+        world.write_model(@p);
 
-    fn contract_defs() -> Span<ContractDef> {
-        [
-            ContractDefTrait::new(@"dojo_starter", @"actions")
-                .with_writer_of([dojo::utils::bytearray_hash(@"dojo_starter")].span())
-        ]
-            .span()
-    }
-
-    #[test]
-    fn test_world_test_set() {
-        // Initialize test environment
-        let caller = starknet::contract_address_const::<0x0>();
-        let ndef = namespace_def();
-
-        // Register the resources.
-        let mut world = spawn_test_world([ndef].span());
-
-        // Ensures permissions and initializations are synced.
-        world.sync_perms_and_inits(contract_defs());
-
-        // Test initial position
-        let mut position: Position = world.read_model(caller);
-        assert(position.vec.x == 0 && position.vec.y == 0, 'initial position wrong');
-
-        // Test write_model_test
-        position.vec.x = 122;
-        position.vec.y = 88;
-
-        world.write_model_test(@position);
-
-        let mut position: Position = world.read_model(caller);
-        assert(position.vec.y == 88, 'write_value_from_id failed');
-
-        // Test model deletion
-        world.erase_model(@position);
-        let position: Position = world.read_model(caller);
-        assert(position.vec.x == 0 && position.vec.y == 0, 'erase_model failed');
+        buy_property_system(world.storage(), player, property_id);
+        let p: Player = world.read_model(player);
+        let prop: Property = world.read_model(property_id);
+        assert(p.in_game_balance == initial_balance - 200, 'Player balance not deducted');
+        assert(prop.owner.is_some(), 'Property not owned after buy');
     }
 
     #[test]
-    #[available_gas(30000000)]
-    fn test_move() {
-        let caller = starknet::contract_address_const::<0x0>();
+    fn test_pay_rent() {
+        let mut world = spawn_test_world([]);
+        let player1 = ContractAddress::from(0x1111);
+        let player2 = ContractAddress::from(0x2222);
+        let mut players = ArrayTrait::new();
+        players.push(player1);
+        players.push(player2);
+        let initial_balance = 1500;
+        start_game_system(world.storage(), players.clone(), initial_balance);
 
-        let ndef = namespace_def();
-        let mut world = spawn_test_world([ndef].span());
-        world.sync_perms_and_inits(contract_defs());
+        // Create a property owned by player1
+        let property_id = 1;
+        let property = Property {
+            id: property_id,
+            name: 'Park Place',
+            price: 350,
+            rent: 35,
+            owner: Option::Some(player1),
+            color_group: 2,
+        };
+        world.write_model(@property);
 
-        let (contract_address, _) = world.dns(@"actions").unwrap();
-        let actions_system = IActionsDispatcher { contract_address };
+        // Move player2 to property
+        let mut p2: Player = world.read_model(player2);
+        p2.position = 1;
+        world.write_model(@p2);
 
-        actions_system.spawn();
-        let initial_moves: Moves = world.read_model(caller);
-        let initial_position: Position = world.read_model(caller);
-
-        assert(
-            initial_position.vec.x == 10 && initial_position.vec.y == 10, 'wrong initial position',
-        );
-
-        actions_system.move(Direction::Right(()).into());
-
-        let moves: Moves = world.read_model(caller);
-        let right_dir_felt: felt252 = Direction::Right(()).into();
-
-        assert(moves.remaining == initial_moves.remaining - 1, 'moves is wrong');
-        assert(moves.last_direction.unwrap().into() == right_dir_felt, 'last direction is wrong');
-
-        let new_position: Position = world.read_model(caller);
-        assert(new_position.vec.x == initial_position.vec.x + 1, 'position x is wrong');
-        assert(new_position.vec.y == initial_position.vec.y, 'position y is wrong');
+        pay_rent_system(world.storage(), player2, property_id);
+        let p1: Player = world.read_model(player1);
+        let p2: Player = world.read_model(player2);
+        assert(p2.in_game_balance == initial_balance - 35, 'Payer balance not deducted');
+        assert(p1.in_game_balance == initial_balance + 35, 'Payee balance not increased');
     }
 }

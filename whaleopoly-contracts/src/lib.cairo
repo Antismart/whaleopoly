@@ -1,9 +1,9 @@
-pub mod systems {
-    pub mod actions;
-}
+// Whaleopoly main library file
+// Exposes all components and systems modules
 
-pub mod models;
+mod components;
+mod systems;
+mod models;
 
-pub mod tests {
-    mod test_world;
-}
+#[cfg(test)]
+mod tests;
