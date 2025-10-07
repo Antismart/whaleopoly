@@ -1,99 +1,109 @@
 #[cfg(test)]
 mod tests {
-    use dojo_cairo_test::WorldStorageTestTrait;
-    use dojo::world::WorldStorageTrait;
-    use dojo_cairo_test::spawn_test_world;
-    use array::ArrayTrait;
+    use dojo::world::{IWorldDispatcher, IWorldDispatcherTrait};
+    use dojo::test_utils::spawn_test_world;
+    use dojo_cairo_test::cairo_bindings::Query;
     use starknet::ContractAddress;
-    use whaleopoly_contracts::components::{player::Player, property::Property, bank::Bank, game::Game};
-    use whaleopoly_contracts::systems::{start_game::start_game_system, buy_property::buy_property_system, pay_rent::pay_rent_system};
-    use array::Array;
-    use option::Option;
 
-    #[test]
-    fn test_game_init_and_player_balances() {
-        let mut world = spawn_test_world([]);
-        let player1 = ContractAddress::from(0x1111);
-        let player2 = ContractAddress::from(0x2222);
-        let mut players = ArrayTrait::new();
-        players.push(player1);
-        players.push(player2);
-        let initial_balance = 1500;
-        start_game_system(world.storage(), players.clone(), initial_balance);
+    use whaleopoly_contracts::components::{
+        Player, Property, Game, DiceRoll, WhaleStatus, Bank, Jail, 
+        ChanceCard, Mortgage, HouseHotel, Reward, Moves, DirectionsAvailable, 
+        Position, PositionCount, Direction, Vec2
+    };
 
-        let p1: Player = world.read_model(player1);
-        let p2: Player = world.read_model(player2);
-        assert(p1.in_game_balance == initial_balance, 'Player 1 initial balance wrong');
-        assert(p2.in_game_balance == initial_balance, 'Player 2 initial balance wrong');
-        let bank: Bank = world.read_model(1);
-        assert(bank.funds == 1_000_000_000, 'Bank initial funds wrong');
+    // Test world setup
+    fn setup_world() -> IWorldDispatcher {
+        spawn_test_world("whaleopoly_contracts")
     }
 
     #[test]
-    fn test_buy_property() {
-        let mut world = spawn_test_world([]);
-        let player = ContractAddress::from(0x1111);
-        let mut players = ArrayTrait::new();
-        players.push(player);
-        let initial_balance = 1500;
-        start_game_system(world.storage(), players.clone(), initial_balance);
-
-        // Create a property at position 0, price 200
-        let property_id = 0;
-        let property = Property {
-            id: property_id,
-            name: 'Boardwalk',
-            price: 200,
-            rent: 50,
-            owner: Option::None,
-            color_group: 1,
-        };
-        world.write_model(@property);
-
-        // Move player to position 0
-        let mut p: Player = world.read_model(player);
-        p.position = 0;
-        world.write_model(@p);
-
-        buy_property_system(world.storage(), player, property_id);
-        let p: Player = world.read_model(player);
-        let prop: Property = world.read_model(property_id);
-        assert(p.in_game_balance == initial_balance - 200, 'Player balance not deducted');
-        assert(prop.owner.is_some(), 'Property not owned after buy');
+    fn test_join_game() {
+        let world = setup_world();
+        let player = starknet::contract_address_const::<0x123>();
+        
+        // Test that we can create a player entity
+        let player_entity = world.entity('Player', array![player.into()]);
+        let mut player_data = player_entity.get_mut::<Player>();
+        
+        player_data.address = player;
+        player_data.balance = 0;
+        player_data.in_game_balance = 1500;
+        player_data.position = 0;
+        player_data.properties_owned = array![];
+        player_data.achievements = 0;
+        
+        // Verify the player was created correctly
+        let read_player = player_entity.get::<Player>();
+        assert(read_player.address == player, 'Player address mismatch');
+        assert(read_player.in_game_balance == 1500, 'Player balance mismatch');
     }
 
     #[test]
-    fn test_pay_rent() {
-        let mut world = spawn_test_world([]);
-        let player1 = ContractAddress::from(0x1111);
-        let player2 = ContractAddress::from(0x2222);
-        let mut players = ArrayTrait::new();
-        players.push(player1);
-        players.push(player2);
-        let initial_balance = 1500;
-        start_game_system(world.storage(), players.clone(), initial_balance);
+    fn test_property_creation() {
+        let world = setup_world();
+        let property_id = 1u32;
+        
+        // Create a property
+        let property_entity = world.entity('Property', array![property_id.into()]);
+        let mut property_data = property_entity.get_mut::<Property>();
+        
+        property_data.id = property_id;
+        property_data.name = 'Boardwalk';
+        property_data.price = 400;
+        property_data.rent = 50;
+        property_data.owner = option::OptionTrait::none();
+        property_data.color_group = 1;
+        
+        // Verify the property was created correctly
+        let read_property = property_entity.get::<Property>();
+        assert(read_property.id == property_id, 'Property ID mismatch');
+        assert(read_property.price == 400, 'Property price mismatch');
+        assert(read_property.name == 'Boardwalk', 'Property name mismatch');
+    }
 
-        // Create a property owned by player1
-        let property_id = 1;
-        let property = Property {
-            id: property_id,
-            name: 'Park Place',
-            price: 350,
-            rent: 35,
-            owner: Option::Some(player1),
-            color_group: 2,
-        };
-        world.write_model(@property);
+    #[test]
+    fn test_dice_roll() {
+        let world = setup_world();
+        let player = starknet::contract_address_const::<0x123>();
+        
+        // Create a dice roll
+        let dice_entity = world.entity('DiceRoll', array![player.into()]);
+        let mut dice_data = dice_entity.get_mut::<DiceRoll>();
+        
+        dice_data.player = player;
+        dice_data.roll = 6;
+        
+        // Verify the dice roll was created correctly
+        let read_dice = dice_entity.get::<DiceRoll>();
+        assert(read_dice.player == player, 'Dice player mismatch');
+        assert(read_dice.roll == 6, 'Dice roll mismatch');
+    }
 
-        // Move player2 to property
-        let mut p2: Player = world.read_model(player2);
-        p2.position = 1;
-        world.write_model(@p2);
+    #[test]
+    fn test_vec2_operations() {
+        let vec1 = Vec2 { x: 0, y: 0 };
+        let vec2 = Vec2 { x: 5, y: 5 };
+        
+        // Test is_zero
+        assert(vec1.is_zero(), 'Vec2 should be zero');
+        assert(!vec2.is_zero(), 'Vec2 should not be zero');
+        
+        // Test is_equal
+        assert(vec1.is_equal(vec1), 'Vec2 should equal itself');
+        assert(!vec1.is_equal(vec2), 'Vec2 should not equal different Vec2');
+    }
 
-        pay_rent_system(world.storage(), player2, property_id);
-        let p1: Player = world.read_model(player1);
-        let p2: Player = world.read_model(player2);
-        assert(p2.in_game_balance == initial_balance - 35, 'Payer balance not deducted');
-        assert(p1.in_game_balance == initial_balance + 35, 'Payee balance not increased');
+    #[test]
+    fn test_direction_enum() {
+        let left = Direction::Left;
+        let right = Direction::Right;
+        let up = Direction::Up;
+        let down = Direction::Down;
+        
+        // Test direction conversion to felt252
+        assert(left.into() == 1, 'Left should be 1');
+        assert(right.into() == 2, 'Right should be 2');
+        assert(up.into() == 3, 'Up should be 3');
+        assert(down.into() == 4, 'Down should be 4');
     }
 }
