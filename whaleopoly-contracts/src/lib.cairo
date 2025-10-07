@@ -1,10 +1,8 @@
 // Whaleopoly main library file
-// Exposes all modules for Web3-themed Monopoly game
+// Exposes all components and actions modules for Dojo 1.5
 
-mod models;
-mod systems;
-mod board;
-mod game_logic;
+mod components;
+mod actions;
 
 #[cfg(test)]
 mod tests;
